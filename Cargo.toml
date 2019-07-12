@@ -6,4 +6,12 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "vec3"
+path = "src/vec3.rs"
+
+[[bin]]
+name = "ray_tracer"
+path = "src/main.rs"
+
 [dependencies]

@@ -37,7 +37,7 @@ fn reflect(i: &Vec3f32, n: &Vec3f32) -> Vec3f32 {
 fn refract(i: &Vec3f32, n: &Vec3f32, eta_t: f32, eta_i: f32) -> Vec3f32 {
     let cosi = -scalar_product(&i, &n).min(1.).max(-1.);
     if cosi < 0. {
-        return refract(i, &(n * -1.), eta_i, eta_t); // TODO this bug i don't know why
+        return refract(i, &(n * -1.), eta_i, eta_t);
     }
     let eta = eta_i / eta_t;
     let k = 1. - eta * eta * (1. - cosi * cosi);

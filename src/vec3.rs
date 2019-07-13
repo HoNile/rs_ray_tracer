@@ -227,7 +227,21 @@ impl Vec3f32 {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
+pub struct Rgba {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Rgba {
+    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Rgba {
+        Rgba { r, g, b, a }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
 pub struct Rgb {
     pub r: f32,
     pub g: f32,

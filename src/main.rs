@@ -1,14 +1,16 @@
-//use rayon::prelude::*; TODO maybe to use
+//use rayon::prelude::*;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
 use std::time::Instant;
 
-use vec3::{Rgb, Vec3f32};
+use vec3::{Rgb, Rgba, Vec3f32};
 
 #[derive(Clone)]
 struct Material {
-    albedo: Rgb,
+    refractive_index: f32,
+    albedo: Rgba,
     diffuse_color: Rgb,
     specular_exponent: f32,
 }
@@ -32,6 +34,20 @@ fn reflect(i: &Vec3f32, n: &Vec3f32) -> Vec3f32 {
     i.clone() - n * 2. * scalar_product(i, n)
 }
 
+fn refract(i: &Vec3f32, n: &Vec3f32, eta_t: f32, eta_i: f32) -> Vec3f32 {
+    let cosi = -scalar_product(&i, &n).min(1.).max(-1.);
+    if cosi < 0. {
+        return refract(i, &(n * -1.), eta_i, eta_t); // TODO this bug i don't know why
+    }
+    let eta = eta_i / eta_t;
+    let k = 1. - eta * eta * (1. - cosi * cosi);
+    if k < 0. {
+        Vec3f32::new(1., 0., 0.)
+    } else {
+        i * eta + n * (eta * cosi - k.sqrt())
+    }
+}
+
 fn scene_intersect(
     orig: &Vec3f32,
     dir: &Vec3f32,
@@ -51,7 +67,25 @@ fn scene_intersect(
             *material = s.material.clone();
         }
     }
-    sphere_dist < 1000.0
+
+    let mut checkerboard_dist = std::f32::MAX;
+    if dir.y.abs() > 1e-3 {
+        let d = -(orig.y + 4.) / dir.y;
+        let pt = orig + dir * d;
+        if d > 0. && pt.x.abs() < 10. && pt.z < -10. && pt.z > -30. && d < sphere_dist {
+            checkerboard_dist = d;
+            *hit = pt;
+            *n = Vec3f32::new(0., 1., 0.);
+            material.diffuse_color =
+                if ((0.5 * hit.x + 1000.) as i32 + (0.5 * hit.z) as i32 & 1) != 0 {
+                    Rgb::new(0.3, 0.3, 0.3)
+                } else {
+                    Rgb::new(0.3, 0.2, 0.1)
+                };
+        }
+    }
+
+    sphere_dist.min(checkerboard_dist) < 1000.
 }
 
 impl Sphere {
@@ -85,27 +119,32 @@ fn cast_ray(
     let mut point = Vec3f32::new(0., 0., 0.);
     let mut n = Vec3f32::new(0., 0., 0.);
     let mut material = Material {
-        albedo: Rgb::new(0., 0., 0.),
+        refractive_index: 1.,
+        albedo: Rgba::new(1., 0., 0., 0.),
         diffuse_color: Rgb::new(0., 0., 0.),
         specular_exponent: 0.,
     };
 
     if !scene_intersect(orig, dir, spheres, &mut point, &mut n, &mut material) || depth > 4 {
-        return Rgb {
-            r: 0.2,
-            g: 0.7,
-            b: 0.8,
-        }; // background color
+        return Rgb::new(0.2, 0.7, 0.8); // background color
     }
 
     let mut reflect_dir = reflect(&dir, &n);
     reflect_dir.normalize();
-    let reflect_orig = if (&reflect_dir * &n).norm() < 0. {
+    let mut refract_dir = refract(&dir, &n, material.refractive_index, 1.);
+    refract_dir.normalize();
+    let reflect_orig = if scalar_product(&reflect_dir, &n) < 0. {
+        point.clone() - &n * 1e-3
+    } else {
+        point.clone() + &n * 1e-3
+    };
+    let refract_orig = if scalar_product(&refract_dir, &n) < 0. {
         point.clone() - &n * 1e-3
     } else {
         point.clone() + &n * 1e-3
     };
     let reflect_color = cast_ray(&reflect_orig, &reflect_dir, &spheres, &lights, depth + 1);
+    let refract_color = cast_ray(&refract_orig, &refract_dir, &spheres, &lights, depth + 1);
 
     let mut diffuse_light_intensity = 0.;
     let mut specular_light_intensity = 0.;
@@ -122,7 +161,8 @@ fn cast_ray(
         let mut shadow_pt = Vec3f32::new(0., 0., 0.);
         let mut shadow_n = Vec3f32::new(0., 0., 0.);
         let mut tmp_material = Material {
-            albedo: Rgb::new(0., 0., 0.),
+            refractive_index: 1.,
+            albedo: Rgba::new(1., 0., 0., 0.),
             diffuse_color: Rgb::new(0., 0., 0.),
             specular_exponent: 0.,
         };
@@ -150,57 +190,85 @@ fn cast_ray(
     material.diffuse_color * diffuse_light_intensity * material.albedo.r
         + Rgb::new(1., 1., 1.) * specular_light_intensity * material.albedo.g
         + reflect_color * material.albedo.b
+        + refract_color * material.albedo.a
 }
 
 fn render(spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
-    const WIDTH: i32 = 1024;
-    const HEIGHT: i32 = 728;
+    const WIDTH: usize = 1024;
+    const HEIGHT: usize = 728;
     const FOV: f32 = (std::f64::consts::PI / 2.0) as f32;
+    const WIDTH_F: f32 = 1024.;
+    const HEIGHT_F: f32 = 728.;
 
-    let mut framebuffer: Vec<Rgb> = vec![
-        Rgb {
-            r: 0.,
-            g: 0.,
-            b: 0.,
-        };
-        (HEIGHT * WIDTH) as usize
-    ];
+    //let mut _framebufferbis= [[Rgb::new(0., 0., 0.); HEIGHT as usize]; WIDTH as usize];
+    let mut framebuffer: Vec<Rgb> = vec![Rgb::new(0., 0., 0.); HEIGHT * WIDTH];
 
     for j in 0..HEIGHT {
         for i in 0..WIDTH {
-            let x = (2.0 * (i as f32 + 0.5) / WIDTH as f32 - 1.0) * (FOV / 2.).tan() * WIDTH as f32
-                / HEIGHT as f32;
-            let y = -(2.0 * (j as f32 + 0.5) / HEIGHT as f32 - 1.0) * (FOV / 2.).tan();
-            let mut dir = Vec3f32::new(x, y, -1.0);
+            let j_f = i32::try_from(u32::try_from(j).unwrap()).unwrap() as f32;
+            let i_f = i32::try_from(u32::try_from(i).unwrap()).unwrap() as f32;
+            let dir_x = (i_f + 0.5) - WIDTH_F / 2.;
+            let dir_y = -(j_f + 0.5) + HEIGHT_F / 2.;
+            let dir_z = -HEIGHT_F / (2. * (FOV / 2.).tan());
+            let mut dir = Vec3f32::new(dir_x, dir_y, dir_z);
             dir.normalize();
-            framebuffer[(i + j * WIDTH) as usize] =
+            framebuffer[i + j * WIDTH] =
                 cast_ray(&Vec3f32::new(0.0, 0.0, 0.0), &dir, spheres, lights, 0);
         }
     }
 
+    /*for pixel in framebufferbis.par_iter_mut().flat_map(|r| r.iter_mut()) {
+
+    }*/
+
+    /*framebuffer.par_iter_mut().enumerate().for_each(|(index, mut v)| {
+        let i = i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 % WIDTH as f32;
+        let j = (i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 - i) / WIDTH as f32;
+        let x = (2.0 * (i as f32 + 0.5) / WIDTH as f32 - 1.0) * (FOV / 2.).tan() * WIDTH as f32
+            / HEIGHT as f32;
+        let y = -(2.0 * (j as f32 + 0.5) / HEIGHT as f32 - 1.0) * (FOV / 2.).tan();
+        let mut dir = Vec3f32::new(x, y, -1.0);
+        dir.normalize();
+        v = &mut cast_ray(&Vec3f32::new(0.0, 0.0, 0.0), &dir, spheres, lights, 0);
+    }
+    );*/
+
     let mut file = BufWriter::new(File::create("out.ppm")?);
     write!(&mut file, "P6\n{} {}\n255\n", WIDTH, HEIGHT).unwrap();
     for i in 0..WIDTH * HEIGHT {
-        file.write_all(&[(255. * framebuffer[i as usize].r.min(1.).max(0.)) as u8])?;
-        file.write_all(&[(255. * framebuffer[i as usize].g.min(1.).max(0.)) as u8])?;
-        file.write_all(&[(255. * framebuffer[i as usize].b.min(1.).max(0.)) as u8])?;
+        let max = framebuffer[i].r.max(framebuffer[i].g.max(framebuffer[i].b));
+        if max > 1. {
+            framebuffer[i] = framebuffer[i] / max;
+        }
+        file.write_all(&[(255. * framebuffer[i].r.min(1.).max(0.)) as u8])?;
+        file.write_all(&[(255. * framebuffer[i].g.min(1.).max(0.)) as u8])?;
+        file.write_all(&[(255. * framebuffer[i].b.min(1.).max(0.)) as u8])?;
     }
     Ok(())
 }
 
 fn main() -> std::io::Result<()> {
     let ivory = Material {
-        albedo: Rgb::new(0.6, 0.3, 0.1),
+        refractive_index: 1.,
+        albedo: Rgba::new(0.6, 0.3, 0.1, 0.),
         diffuse_color: Rgb::new(0.4, 0.4, 0.3),
         specular_exponent: 50.,
     };
+    let glass = Material {
+        refractive_index: 1.5,
+        albedo: Rgba::new(0., 0.5, 0.1, 0.8),
+        diffuse_color: Rgb::new(0.6, 0.7, 0.8),
+        specular_exponent: 125.,
+    };
     let red_rubber = Material {
-        albedo: Rgb::new(0.9, 0.1, 0.),
+        refractive_index: 1.,
+        albedo: Rgba::new(0.9, 0.1, 0., 0.),
         diffuse_color: Rgb::new(0.3, 0.1, 0.1),
         specular_exponent: 10.,
     };
     let mirror = Material {
-        albedo: Rgb::new(0., 10., 0.8),
+        refractive_index: 1.,
+        albedo: Rgba::new(0., 10., 0.8, 0.),
         diffuse_color: Rgb::new(1., 1., 1.),
         specular_exponent: 1425.,
     };
@@ -214,7 +282,7 @@ fn main() -> std::io::Result<()> {
         Sphere {
             center: Vec3f32::new(-1.0, -1.5, -12.0),
             radius: 2.0,
-            material: mirror.clone(),
+            material: glass.clone(),
         },
         Sphere {
             center: Vec3f32::new(1.5, -0.5, -18.0),
@@ -247,7 +315,6 @@ fn main() -> std::io::Result<()> {
     render(&spheres, &lights)?;
 
     let elapsed = start.elapsed();
-    // or format as milliseconds:
     println!(
         "Elapsed: {} ms",
         (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64

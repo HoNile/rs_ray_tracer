@@ -77,7 +77,7 @@ fn scene_intersect(
             *hit = pt;
             *n = Vec3f32::new(0., 1., 0.);
             material.diffuse_color =
-                if ((0.5 * hit.x + 1000.) as i32 + (0.5 * hit.z) as i32 & 1) != 0 {
+                if (((0.5 * hit.x + 1000.) as i32 + (0.5 * hit.z) as i32) & 1) != 0 {
                     Rgb::new(0.3, 0.3, 0.3)
                 } else {
                     Rgb::new(0.3, 0.2, 0.1)
@@ -204,8 +204,8 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
         .par_iter_mut()
         .enumerate()
         .for_each(|(index, v)| {
-            let i = i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 % WIDTH as f32;
-            let j = i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 / WIDTH as f32;
+            let i = u32::try_from(index).unwrap() as f32 % WIDTH as f32;
+            let j = u32::try_from(index).unwrap() as f32 / WIDTH as f32;
             let x = (2.0 * (i as f32 + 0.5) / WIDTH as f32 - 1.0) * (FOV / 2.).tan() * WIDTH as f32
                 / HEIGHT as f32;
             let y = -(2.0 * (j as f32 + 0.5) / HEIGHT as f32 - 1.0) * (FOV / 2.).tan();
@@ -298,7 +298,7 @@ fn main() -> std::io::Result<()> {
     let elapsed = start.elapsed();
     println!(
         "Elapsed: {} ms",
-        (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+        (elapsed.as_secs() * 1_000) + elapsed.subsec_millis() as u64
     );
     Ok(())
 }

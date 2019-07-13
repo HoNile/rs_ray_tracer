@@ -1,4 +1,4 @@
-//use rayon::prelude::*;
+use rayon::prelude::*;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::prelude::*;
@@ -197,41 +197,22 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 728;
     const FOV: f32 = (std::f64::consts::PI / 2.0) as f32;
-    const WIDTH_F: f32 = 1024.;
-    const HEIGHT_F: f32 = 728.;
 
-    //let mut _framebufferbis= [[Rgb::new(0., 0., 0.); HEIGHT as usize]; WIDTH as usize];
     let mut framebuffer: Vec<Rgb> = vec![Rgb::new(0., 0., 0.); HEIGHT * WIDTH];
 
-    for j in 0..HEIGHT {
-        for i in 0..WIDTH {
-            let j_f = i32::try_from(u32::try_from(j).unwrap()).unwrap() as f32;
-            let i_f = i32::try_from(u32::try_from(i).unwrap()).unwrap() as f32;
-            let dir_x = (i_f + 0.5) - WIDTH_F / 2.;
-            let dir_y = -(j_f + 0.5) + HEIGHT_F / 2.;
-            let dir_z = -HEIGHT_F / (2. * (FOV / 2.).tan());
-            let mut dir = Vec3f32::new(dir_x, dir_y, dir_z);
+    framebuffer
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(index, v)| {
+            let i = i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 % WIDTH as f32;
+            let j = i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 / WIDTH as f32;
+            let x = (2.0 * (i as f32 + 0.5) / WIDTH as f32 - 1.0) * (FOV / 2.).tan() * WIDTH as f32
+                / HEIGHT as f32;
+            let y = -(2.0 * (j as f32 + 0.5) / HEIGHT as f32 - 1.0) * (FOV / 2.).tan();
+            let mut dir = Vec3f32::new(x, y, -1.0);
             dir.normalize();
-            framebuffer[i + j * WIDTH] =
-                cast_ray(&Vec3f32::new(0.0, 0.0, 0.0), &dir, spheres, lights, 0);
-        }
-    }
-
-    /*for pixel in framebufferbis.par_iter_mut().flat_map(|r| r.iter_mut()) {
-
-    }*/
-
-    /*framebuffer.par_iter_mut().enumerate().for_each(|(index, mut v)| {
-        let i = i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 % WIDTH as f32;
-        let j = (i32::try_from(u32::try_from(index).unwrap()).unwrap() as f32 - i) / WIDTH as f32;
-        let x = (2.0 * (i as f32 + 0.5) / WIDTH as f32 - 1.0) * (FOV / 2.).tan() * WIDTH as f32
-            / HEIGHT as f32;
-        let y = -(2.0 * (j as f32 + 0.5) / HEIGHT as f32 - 1.0) * (FOV / 2.).tan();
-        let mut dir = Vec3f32::new(x, y, -1.0);
-        dir.normalize();
-        v = &mut cast_ray(&Vec3f32::new(0.0, 0.0, 0.0), &dir, spheres, lights, 0);
-    }
-    );*/
+            *v = cast_ray(&Vec3f32::new(0.0, 0.0, 0.0), &dir, spheres, lights, 0);
+        });
 
     let mut file = BufWriter::new(File::create("out.ppm")?);
     write!(&mut file, "P6\n{} {}\n255\n", WIDTH, HEIGHT).unwrap();

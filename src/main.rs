@@ -131,7 +131,8 @@ fn cast_ray(
     if !scene_intersect(orig, dir, spheres, &mut point, &mut n, &mut material) || depth > 4 {
         let mut norm_dir = dir.clone();
         norm_dir.normalize();
-        let x = (norm_dir.z.atan2(norm_dir.x) / (2. * std::f32::consts::PI) + 0.5) * background.width() as f32;
+        let x = (norm_dir.z.atan2(norm_dir.x) / (2. * std::f32::consts::PI) + 0.5)
+            * background.width() as f32;
         let y = (norm_dir.y.acos() / std::f32::consts::PI) * background.height() as f32;
         let rgb_pixel = background.get_pixel(x as u32, y as u32);
         return Rgb::new(

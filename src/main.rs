@@ -5,6 +5,8 @@ use std::io::prelude::*;
 use std::io::BufWriter;
 use std::time::Instant;
 
+use image::RgbImage;
+
 use vec3::{Rgb, Rgba, Vec3f32};
 
 #[derive(Clone)]
@@ -114,6 +116,7 @@ fn cast_ray(
     dir: &Vec3f32,
     spheres: &[Sphere],
     lights: &[Light],
+    background: &RgbImage,
     depth: usize,
 ) -> Rgb {
     let mut point = Vec3f32::new(0., 0., 0.);
@@ -126,7 +129,16 @@ fn cast_ray(
     };
 
     if !scene_intersect(orig, dir, spheres, &mut point, &mut n, &mut material) || depth > 4 {
-        return Rgb::new(0.2, 0.7, 0.8); // background color
+        let mut norm_dir = dir.clone();
+        norm_dir.normalize();
+        let x = (norm_dir.z.atan2(norm_dir.x) / (2. * std::f32::consts::PI) + 0.5) * 7616.;
+        let y = (norm_dir.y.acos() / std::f32::consts::PI) * 3808.;
+        let rgb_pixel = background.get_pixel(x as u32, y as u32);
+        return Rgb::new(
+            rgb_pixel[0] as f32 / 255.,
+            rgb_pixel[1] as f32 / 255.,
+            rgb_pixel[2] as f32 / 255.,
+        );
     }
 
     let mut reflect_dir = reflect(&dir, &n);
@@ -143,8 +155,22 @@ fn cast_ray(
     } else {
         point.clone() + &n * 1e-3
     };
-    let reflect_color = cast_ray(&reflect_orig, &reflect_dir, &spheres, &lights, depth + 1);
-    let refract_color = cast_ray(&refract_orig, &refract_dir, &spheres, &lights, depth + 1);
+    let reflect_color = cast_ray(
+        &reflect_orig,
+        &reflect_dir,
+        &spheres,
+        &lights,
+        background,
+        depth + 1,
+    );
+    let refract_color = cast_ray(
+        &refract_orig,
+        &refract_dir,
+        &spheres,
+        &lights,
+        background,
+        depth + 1,
+    );
 
     let mut diffuse_light_intensity = 0.;
     let mut specular_light_intensity = 0.;
@@ -193,7 +219,7 @@ fn cast_ray(
         + refract_color * material.albedo.a
 }
 
-fn render(spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
+fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 728;
     const FOV: f32 = (std::f64::consts::PI / 2.0) as f32;
@@ -206,12 +232,19 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
         .for_each(|(index, v)| {
             let i = u32::try_from(index).unwrap() as f32 % WIDTH as f32;
             let j = u32::try_from(index).unwrap() as f32 / WIDTH as f32;
-            let x = (2.0 * (i as f32 + 0.5) / WIDTH as f32 - 1.0) * (FOV / 2.).tan() * WIDTH as f32
-                / HEIGHT as f32;
-            let y = -(2.0 * (j as f32 + 0.5) / HEIGHT as f32 - 1.0) * (FOV / 2.).tan();
-            let mut dir = Vec3f32::new(x, y, -1.0);
+            let dir_x = (i as f32 + 0.5) - WIDTH as f32 / 2.;
+            let dir_y = -(j as f32 + 0.5) + HEIGHT as f32 / 2.;
+            let dir_z = -1. * HEIGHT as f32 / (2. * (FOV / 2.).tan());
+            let mut dir = Vec3f32::new(dir_x, dir_y, dir_z);
             dir.normalize();
-            *v = cast_ray(&Vec3f32::new(0.0, 0.0, 0.0), &dir, spheres, lights, 0);
+            *v = cast_ray(
+                &Vec3f32::new(0.0, 0.0, 0.0),
+                &dir,
+                spheres,
+                lights,
+                background,
+                0,
+            );
         });
 
     let mut file = BufWriter::new(File::create("out.ppm")?);
@@ -229,6 +262,8 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
+    let background = image::open("./envmap.jpg").unwrap().to_rgb();
+
     let ivory = Material {
         refractive_index: 1.,
         albedo: Rgba::new(0.6, 0.3, 0.1, 0.),
@@ -293,7 +328,7 @@ fn main() -> std::io::Result<()> {
     ];
     let start = Instant::now();
 
-    render(&spheres, &lights)?;
+    render(&background, &spheres, &lights)?;
 
     let elapsed = start.elapsed();
     println!(

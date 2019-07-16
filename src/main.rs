@@ -249,15 +249,15 @@ fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> std::i
         });
 
     let mut file = BufWriter::new(File::create("out.ppm")?);
-    write!(&mut file, "P6\n{} {}\n255\n", WIDTH, HEIGHT).unwrap();
-    for i in 0..WIDTH * HEIGHT {
-        let max = framebuffer[i].r.max(framebuffer[i].g.max(framebuffer[i].b));
+    write!(&mut file, "P6\n{} {}\n255\n", WIDTH, HEIGHT)?;
+    for v in framebuffer.iter_mut() {
+        let max = v.r.max(v.g.max(v.b));
         if max > 1. {
-            framebuffer[i] = framebuffer[i] / max;
+            *v = *v / max;
         }
-        file.write_all(&[(255. * framebuffer[i].r.min(1.).max(0.)) as u8])?;
-        file.write_all(&[(255. * framebuffer[i].g.min(1.).max(0.)) as u8])?;
-        file.write_all(&[(255. * framebuffer[i].b.min(1.).max(0.)) as u8])?;
+        file.write_all(&[(255. * v.r.min(1.).max(0.)) as u8])?;
+        file.write_all(&[(255. * v.g.min(1.).max(0.)) as u8])?;
+        file.write_all(&[(255. * v.b.min(1.).max(0.)) as u8])?;
     }
     Ok(())
 }

@@ -4,12 +4,62 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
 use std::time::Instant;
+use std::io;
+use std::error;
+use std::fmt;
 
-use image::RgbImage;
+use image::{ImageError, RgbImage};
 
 use vec3::{Rgb, Rgba, Vec3f32};
 
-#[derive(Clone)]
+#[derive(Debug)]
+enum RayTracerError {
+   Parse(ImageError),
+   Render(io::Error),
+}
+
+impl fmt::Display for RayTracerError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            RayTracerError::Parse(ref err) => write!(f, "Parse error: {}", err),
+            RayTracerError::Render(ref err) => write!(f, "Render error: {}", err),
+        }
+    }
+}
+
+impl error::Error for RayTracerError {
+    fn description(&self) -> &str {
+        match *self {
+            RayTracerError::Parse(ref err) => error::Error::description(err),
+            RayTracerError::Render(ref err) => error::Error::description(err),
+        }
+    }
+
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match *self {
+            RayTracerError::Parse(ref err) => Some(err),
+            RayTracerError::Render(ref err) => Some(err),
+        }
+    }
+}
+
+impl From<io::Error> for RayTracerError {
+    fn from(err: io::Error) -> RayTracerError {
+        RayTracerError::Render(err)
+    }
+}
+
+impl From<ImageError> for RayTracerError {
+    fn from(err: ImageError) -> RayTracerError {
+        RayTracerError::Parse(err)
+    }
+}
+
+// https://doc.rust-lang.org/rust-by-example/error/result/result_alias.html
+// Generic form not needed today type ResultRayTracer<T> = Result<T, RayTracerError>;
+type ResultRayTracer = Result<(), RayTracerError>;
+
+#[derive(Debug, Clone)]
 struct Material {
     refractive_index: f32,
     albedo: Rgba,
@@ -17,27 +67,25 @@ struct Material {
     specular_exponent: f32,
 }
 
+#[derive(Debug)]
 struct Sphere {
     center: Vec3f32,
     radius: f32,
     material: Material,
 }
 
+#[derive(Debug)]
 struct Light {
     position: Vec3f32,
     intensity: f32,
 }
 
-fn scalar_product(v1: &Vec3f32, v2: &Vec3f32) -> f32 {
-    v1.x * v2.x + v1.y * v2.y + v1.z * v2.z
-}
-
 fn reflect(i: &Vec3f32, n: &Vec3f32) -> Vec3f32 {
-    i.clone() - n * 2. * scalar_product(i, n)
+    i.clone() - n * 2. * i.dot_product(n)
 }
 
 fn refract(i: &Vec3f32, n: &Vec3f32, eta_t: f32, eta_i: f32) -> Vec3f32 {
-    let cosi = -scalar_product(&i, &n).min(1.).max(-1.);
+    let cosi = -i.dot_product(n).min(1.).max(-1.);
     if cosi < 0. {
         return refract(i, &(n * -1.), eta_i, eta_t);
     }
@@ -93,8 +141,8 @@ fn scene_intersect(
 impl Sphere {
     fn ray_intersect(self: &Sphere, orig: &Vec3f32, dir: &Vec3f32, t0: &mut f32) -> bool {
         let l = &self.center - orig;
-        let tca = scalar_product(&l, dir);
-        let d2 = scalar_product(&l, &l) - tca * tca;
+        let tca = l.dot_product(dir);
+        let d2 = l.dot_product(&l) - tca * tca;
         if d2 > self.radius * self.radius {
             return false;
         }
@@ -146,12 +194,12 @@ fn cast_ray(
     reflect_dir.normalize();
     let mut refract_dir = refract(&dir, &n, material.refractive_index, 1.);
     refract_dir.normalize();
-    let reflect_orig = if scalar_product(&reflect_dir, &n) < 0. {
+    let reflect_orig = if reflect_dir.dot_product(&n) < 0. {
         point.clone() - &n * 1e-3
     } else {
         point.clone() + &n * 1e-3
     };
-    let refract_orig = if scalar_product(&refract_dir, &n) < 0. {
+    let refract_orig = if refract_dir.dot_product(&n) < 0. {
         point.clone() - &n * 1e-3
     } else {
         point.clone() + &n * 1e-3
@@ -206,9 +254,9 @@ fn cast_ray(
             continue;
         }
 
-        diffuse_light_intensity += l.intensity * scalar_product(&light_dir, &n).max(0.);
+        diffuse_light_intensity += l.intensity * light_dir.dot_product(&n).max(0.);
         let vec_reflect = reflect(&(light_dir * -1.), &n) * -1.;
-        specular_light_intensity += scalar_product(&vec_reflect, &dir)
+        specular_light_intensity += vec_reflect.dot_product(dir)
             .max(0.)
             .powf(material.specular_exponent)
             * l.intensity
@@ -220,7 +268,7 @@ fn cast_ray(
         + refract_color * material.albedo.a
 }
 
-fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> std::io::Result<()> {
+fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> ResultRayTracer {
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 728;
     const FOV: f32 = (std::f64::consts::PI / 2.0) as f32;
@@ -231,6 +279,7 @@ fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> std::i
         .par_iter_mut()
         .enumerate()
         .for_each(|(index, v)| {
+            // unwrap could not failed with actual WIDTH and HEIGHT
             let i = u32::try_from(index).unwrap() as f32 % WIDTH as f32;
             let j = u32::try_from(index).unwrap() as f32 / WIDTH as f32;
             let dir_x = (i as f32 + 0.5) - WIDTH as f32 / 2.;
@@ -262,8 +311,8 @@ fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> std::i
     Ok(())
 }
 
-fn main() -> std::io::Result<()> {
-    let background = image::open("./envmap.jpg").unwrap().to_rgb();
+fn main() -> ResultRayTracer {
+    let background = image::open("./envmap.jpg")?.to_rgb();
 
     let ivory = Material {
         refractive_index: 1.,

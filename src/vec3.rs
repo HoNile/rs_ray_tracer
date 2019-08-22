@@ -2,7 +2,7 @@ use std::ops::{Add, Div, Mul, Sub};
 
 //TODO this should be generic
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Vec3f32 {
     pub x: f32,
     pub y: f32,
@@ -215,19 +215,26 @@ impl Vec3f32 {
         Vec3f32 { x, y, z }
     }
 
+    #[inline(always)]
     pub fn norm(self: &Self) -> f32 {
         (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
     }
 
+    #[inline(always)]
     pub fn normalize(self: &mut Self) {
         let length = ((self.x * self.x) + (self.y * self.y) + (self.z * self.z)).sqrt();
         self.x /= length;
         self.y /= length;
         self.z /= length;
     }
+
+    #[inline(always)] // NOTE: compiler seem to not inline method as much as free function
+    pub fn dot_product(self: &Self, other: &Vec3f32) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Rgba {
     pub r: f32,
     pub g: f32,
@@ -241,7 +248,7 @@ impl Rgba {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rgb {
     pub r: f32,
     pub g: f32,

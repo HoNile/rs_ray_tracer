@@ -1,21 +1,19 @@
+mod color;
+mod vec3;
+
 use rayon::prelude::*;
-use std::convert::TryFrom;
-use std::fs::File;
 use std::io::prelude::*;
-use std::io::BufWriter;
-use std::time::Instant;
-use std::io;
-use std::error;
-use std::fmt;
+use std::{convert::TryFrom, error, fmt, fs::File, io, io::BufWriter, time::Instant};
 
 use image::{ImageError, RgbImage};
 
-use vec3::{Rgb, Rgba, Vec3f32};
+use crate::color::{Rgb, Rgba};
+use crate::vec3::Vec3f32;
 
 #[derive(Debug)]
 enum RayTracerError {
-   Parse(ImageError),
-   Render(io::Error),
+    Parse(ImageError),
+    Render(io::Error),
 }
 
 impl fmt::Display for RayTracerError {
@@ -59,7 +57,7 @@ impl From<ImageError> for RayTracerError {
 // Generic form not needed today type ResultRayTracer<T> = Result<T, RayTracerError>;
 type ResultRayTracer = Result<(), RayTracerError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct Material {
     refractive_index: f32,
     albedo: Rgba,
@@ -81,7 +79,7 @@ struct Light {
 }
 
 fn reflect(i: &Vec3f32, n: &Vec3f32) -> Vec3f32 {
-    i.clone() - n * 2. * i.dot_product(n)
+    i - n * 2. * i.dot_product(n)
 }
 
 fn refract(i: &Vec3f32, n: &Vec3f32, eta_t: f32, eta_i: f32) -> Vec3f32 {
@@ -112,9 +110,9 @@ fn scene_intersect(
         if s.ray_intersect(orig, dir, &mut dist_i) && dist_i < sphere_dist {
             sphere_dist = dist_i;
             *hit = orig + dir * dist_i;
-            *n = hit.clone() - &s.center;
+            *n = *hit - &s.center;
             n.normalize();
-            *material = s.material.clone();
+            *material = s.material;
         }
     }
 
@@ -177,7 +175,7 @@ fn cast_ray(
     };
 
     if !scene_intersect(orig, dir, spheres, &mut point, &mut n, &mut material) || depth > 4 {
-        let mut norm_dir = dir.clone();
+        let mut norm_dir = *dir;
         norm_dir.normalize();
         let x = (norm_dir.z.atan2(norm_dir.x) / (2. * std::f32::consts::PI) + 0.5)
             * background.width() as f32;
@@ -195,14 +193,14 @@ fn cast_ray(
     let mut refract_dir = refract(&dir, &n, material.refractive_index, 1.);
     refract_dir.normalize();
     let reflect_orig = if reflect_dir.dot_product(&n) < 0. {
-        point.clone() - &n * 1e-3
+        point - &n * 1e-3
     } else {
-        point.clone() + &n * 1e-3
+        point + &n * 1e-3
     };
     let refract_orig = if refract_dir.dot_product(&n) < 0. {
-        point.clone() - &n * 1e-3
+        point - &n * 1e-3
     } else {
-        point.clone() + &n * 1e-3
+        point + &n * 1e-3
     };
     let reflect_color = cast_ray(
         &reflect_orig,
@@ -229,9 +227,9 @@ fn cast_ray(
         light_dir.normalize();
 
         let shadow_orig = if (&light_dir * &n).norm() < 0. {
-            point.clone() - &n * 1e-3
+            point - &n * 1e-3
         } else {
-            point.clone() + &n * 1e-3
+            point + &n * 1e-3
         };
         let mut shadow_pt = Vec3f32::new(0., 0., 0.);
         let mut shadow_n = Vec3f32::new(0., 0., 0.);
@@ -256,7 +254,8 @@ fn cast_ray(
 
         diffuse_light_intensity += l.intensity * light_dir.dot_product(&n).max(0.);
         let vec_reflect = reflect(&(light_dir * -1.), &n) * -1.;
-        specular_light_intensity += vec_reflect.dot_product(dir)
+        specular_light_intensity += vec_reflect
+            .dot_product(dir)
             .max(0.)
             .powf(material.specular_exponent)
             * l.intensity
@@ -343,22 +342,22 @@ fn main() -> ResultRayTracer {
         Sphere {
             center: Vec3f32::new(-3.0, 0.0, -16.0),
             radius: 2.0,
-            material: ivory.clone(),
+            material: ivory,
         },
         Sphere {
             center: Vec3f32::new(-1.0, -1.5, -12.0),
             radius: 2.0,
-            material: glass.clone(),
+            material: glass,
         },
         Sphere {
             center: Vec3f32::new(1.5, -0.5, -18.0),
             radius: 3.0,
-            material: red_rubber.clone(),
+            material: red_rubber,
         },
         Sphere {
             center: Vec3f32::new(7.0, 5.0, -18.0),
             radius: 4.0,
-            material: mirror.clone(),
+            material: mirror,
         },
     ];
 

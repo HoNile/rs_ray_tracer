@@ -3,7 +3,7 @@ mod vec3;
 
 use rayon::prelude::*;
 use std::io::prelude::*;
-use std::{convert::TryFrom, error, fmt, fs::File, io, io::BufWriter, time::Instant};
+use std::{error, fmt, fs::File, io, io::BufWriter, time::Instant};
 
 use image::{ImageError, RgbImage};
 
@@ -26,13 +26,6 @@ impl fmt::Display for RayTracerError {
 }
 
 impl error::Error for RayTracerError {
-    fn description(&self) -> &str {
-        match *self {
-            RayTracerError::Parse(ref err) => error::Error::description(err),
-            RayTracerError::Render(ref err) => error::Error::description(err),
-        }
-    }
-
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match *self {
             RayTracerError::Parse(ref err) => Some(err),
@@ -278,9 +271,8 @@ fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> Result
         .par_iter_mut()
         .enumerate()
         .for_each(|(index, v)| {
-            // unwrap could not failed with actual WIDTH and HEIGHT
-            let i = u32::try_from(index).unwrap() as f32 % WIDTH as f32;
-            let j = u32::try_from(index).unwrap() as f32 / WIDTH as f32;
+            let i = index as u32 as f32 % WIDTH as f32;
+            let j = index as u32 as f32 / WIDTH as f32;
             let dir_x = (i as f32 + 0.5) - WIDTH as f32 / 2.;
             let dir_y = -(j as f32 + 0.5) + HEIGHT as f32 / 2.;
             let dir_z = -1. * HEIGHT as f32 / (2. * (FOV / 2.).tan());
@@ -303,9 +295,11 @@ fn render(background: &RgbImage, spheres: &[Sphere], lights: &[Light]) -> Result
         if max > 1. {
             *v = *v / max;
         }
-        file.write_all(&[(255. * v.r.min(1.).max(0.)) as u8])?;
-        file.write_all(&[(255. * v.g.min(1.).max(0.)) as u8])?;
-        file.write_all(&[(255. * v.b.min(1.).max(0.)) as u8])?;
+        file.write_all(&[
+            (255. * v.r.min(1.).max(0.)) as u8,
+            (255. * v.g.min(1.).max(0.)) as u8,
+            (255. * v.b.min(1.).max(0.)) as u8,
+        ])?;
     }
     Ok(())
 }
